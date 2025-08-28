@@ -55,13 +55,12 @@ app.get("/", async (req, res) => {
             return res.send(text);
         } else {
             // Trả về stream cho media
-            return res.send(upstreamResponse.body);
+            return upstreamResponse.body.pipe(res)
         }
     }
 
     // ✅ 6. Lấy Content-Type
-    const contentType =
-      upstreamResponse.headers.get("content-type") || "application/octet-stream";
+    const contentType = upstreamResponse.headers.get("content-type") || "application/octet-stream";
 
     // ✅ 7. Tạo tên file tải xuống
     let extension = req.query.extension || contentType.split("/")[1]?.split(";")[0] || "bin";
