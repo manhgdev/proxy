@@ -44,22 +44,27 @@ app.get("/", async (req, res) => {
       redirect: "follow",
     });
 
-    // ✅ 5. Nếu bật debug=1 thì trả text ra luôn (đỡ phải tải file)
+    // ✅ 5. Debug mode
     if (debug) {
-      const html = await upstreamResponse.text();
-      return res.send(html);
+        const contentType = upstreamResponse.headers.get("Content-Type") || "application/octet-stream";
+    
+        if (contentType.startsWith("text/") || contentType.includes("json") || contentType.includes("xml")) 
+        {
+            // Trả về dạng text
+            const text = await upstreamResponse.text();
+            return res.send(text);
+        } else {
+            // Trả về stream cho media
+            return res.send(upstreamResponse.body);
+        }
     }
 
     // ✅ 6. Lấy Content-Type
     const contentType =
-      upstreamResponse.headers.get("content-type") ||
-      "application/octet-stream";
+      upstreamResponse.headers.get("content-type") || "application/octet-stream";
 
     // ✅ 7. Tạo tên file tải xuống
-    let extension =
-      req.query.extension ||
-      contentType.split("/")[1]?.split(";")[0] ||
-      "bin";
+    let extension = req.query.extension || contentType.split("/")[1]?.split(";")[0] || "bin";
 
     const quality = req.query.quality;
     const name = req.query.name;
