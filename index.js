@@ -52,9 +52,6 @@ app.get("/", async (req, res) => {
             // Trả về dạng text
             const text = await upstreamResponse.text();
             return res.send(text);
-        } else {
-            // Trả về stream cho media
-            return upstreamResponse.body.pipe(res)
         }
     }
 
