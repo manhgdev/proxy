@@ -14,6 +14,7 @@ app.get("/", async (req, res) => {
   }
 
   const debug = req.query.debug === "1";
+  const download = req.query.download === "1"; // ✅ kiểm tra download=1
 
   // Header giả lập
   const customHeaders = {
@@ -55,17 +56,23 @@ app.get("/", async (req, res) => {
 
     const filename = `${newName}.${extension}`;
 
+    // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`
-    );
+
     res.setHeader("Content-Type", contentType);
 
-    // Pipe body về client
+    // ✅ Nếu có download=1 thì ép tải xuống
+    if (download) {
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+    }
+
+    // Stream nội dung trực tiếp
     upstreamResponse.body.pipe(res);
   } catch (err) {
     console.error(err);
