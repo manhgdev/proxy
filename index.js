@@ -1,97 +1,81 @@
-// index.js
 import express from "express";
+import { Readable } from "stream"; // dùng để chuyển đổi Web Stream sang Node Stream
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware: Set CORS cho tất cả request
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "*");
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  next();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
 });
 
-// Route chính
 app.get("/", async (req, res) => {
-  const timestamp = Date.now();
+    const timestamp = Date.now();
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.status(400).send("Missing url parameter");
 
-  // ✅ 1. Kiểm tra tham số url
-  const targetUrl = req.query.url;
-  if (!targetUrl) {
-    return res.status(400).send("Missing url parameter");
-  }
+    const debug = req.query.debug === "1";
+    const download = req.query.download === "1";
 
-  // ✅ 2. Lấy các tham số khác
-  const debug = req.query.debug === "1";      // Debug mode: trả raw HTML/text
-  const download = req.query.download === "1"; // Nếu download=1 thì ép tải về
+    const customHeaders = {
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        Referer: new URL(targetUrl).origin,
+        Origin: new URL(targetUrl).origin,
+    };
 
-  // ✅ 3. Header giả lập để tránh bị server chặn
-  const customHeaders = {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    Referer: new URL(targetUrl).origin,
-    Origin: new URL(targetUrl).origin,
-  };
+    try {
+        const upstreamResponse = await fetch(targetUrl, {
+            headers: customHeaders,
+            redirect: "follow",
+        });
 
-  try {
-    // ✅ 4. Fetch từ URL gốc
-    const upstreamResponse = await fetch(targetUrl, {
-      method: "GET",
-      headers: customHeaders,
-      redirect: "follow",
-    });
+        const contentType =
+            upstreamResponse.headers.get("content-type") ||
+            "application/octet-stream";
 
-    // ✅ 5. Debug mode
-    if (debug) {
-        const contentType = upstreamResponse.headers.get("Content-Type") || "application/octet-stream";
-    
-        if (contentType.startsWith("text/") || contentType.includes("json") || contentType.includes("xml")) 
-        {
-            // Trả về dạng text
-            const text = await upstreamResponse.text();
-            return res.send(text);
+        if (debug) {
+            if (
+                contentType.startsWith("text/") ||
+                contentType.includes("json") ||
+                contentType.includes("xml")
+            ) {
+                const text = await upstreamResponse.text();
+                return res.send(text);
+            }
         }
+
+        let extension =
+            req.query.extension ||
+            contentType.split("/")[1]?.split(";")[0] ||
+            "bin";
+
+        const quality = req.query.quality;
+        const name = req.query.name;
+        const newName = name
+            ? `${name}_${timestamp}`
+            : quality
+                ? `${quality}_${timestamp}`
+                : `zmapi_${timestamp}`;
+        const filename = `${newName}.${extension}`;
+
+        res.setHeader("Content-Type", contentType);
+        if (download) {
+            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        }
+
+        // ✅ convert Web Stream -> Node Stream để pipe
+        const nodeStream = Readable.fromWeb(upstreamResponse.body);
+        nodeStream.pipe(res);
+    } catch (err) {
+        console.error(err);
+        res.status(502).send(`Error fetching the url: ${err.message}`);
     }
-
-    // ✅ 6. Lấy Content-Type
-    const contentType = upstreamResponse.headers.get("content-type") || "application/octet-stream";
-
-    // ✅ 7. Tạo tên file tải xuống
-    let extension = req.query.extension || contentType.split("/")[1]?.split(";")[0] || "bin";
-
-    const quality = req.query.quality;
-    const name = req.query.name;
-
-    const newName = name
-      ? `${name}_${timestamp}`
-      : quality
-      ? `${quality}_${timestamp}`
-      : `zmapi_${timestamp}`;
-
-    const filename = `${newName}.${extension}`;
-
-    // ✅ 8. Set Content-Type
-    res.setHeader("Content-Type", contentType);
-
-    // ✅ 9. Nếu có download=1 thì thêm Content-Disposition để ép tải xuống
-    if (download) {
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${filename}"`
-      );
-    }
-
-    // ✅ 10. Trả dữ liệu về client (stream trực tiếp)
-    upstreamResponse.body.pipe(res);
-  } catch (err) {
-    console.error(err);
-    res.status(502).send(`Error fetching the url: ${err.message}`);
-  }
 });
 
-// Khởi động server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
