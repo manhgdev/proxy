@@ -1,9 +1,14 @@
+// index.js
 import express from "express";
-import { Readable } from "stream"; // dùng để chuyển đổi Web Stream sang Node Stream
+import { Readable } from "stream";
+import { pipeline } from "stream";
+import { promisify } from "util";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
+const pump = promisify(pipeline);
 
+// ===== Middleware CORS =====
 app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
@@ -12,6 +17,7 @@ app.use((req, res, next) => {
     next();
 });
 
+// ===== Main Route =====
 app.get("/", async (req, res) => {
     const timestamp = Date.now();
     const targetUrl = req.query.url;
@@ -20,6 +26,7 @@ app.get("/", async (req, res) => {
     const debug = req.query.debug === "1";
     const download = req.query.download === "1";
 
+    // headers giả browser
     const customHeaders = {
         "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -48,6 +55,7 @@ app.get("/", async (req, res) => {
             }
         }
 
+        // tên file xuất ra
         let extension =
             req.query.extension ||
             contentType.split("/")[1]?.split(";")[0] ||
@@ -64,18 +72,28 @@ app.get("/", async (req, res) => {
 
         res.setHeader("Content-Type", contentType);
         if (download) {
-            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${filename}"`
+            );
         }
 
-        // ✅ convert Web Stream -> Node Stream để pipe
-        const nodeStream = Readable.fromWeb(upstreamResponse.body);
-        nodeStream.pipe(res);
+        // ✅ Stream an toàn bằng pipeline
+        await pump(
+            Readable.fromWeb(upstreamResponse.body),
+            res
+        );
     } catch (err) {
-        console.error(err);
-        res.status(502).send(`Error fetching the url: ${err.message}`);
+        console.error("Proxy error:", err);
+        if (!res.headersSent) {
+            res.status(502).send(`Error fetching the url: ${err.message}`);
+        } else {
+            res.end();
+        }
     }
 });
 
+// ===== Start server =====
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
