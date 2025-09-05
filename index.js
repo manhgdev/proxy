@@ -17,26 +17,23 @@ app.use((req, res, next) => {
     next();
 });
 
-// ===== Main Route =====
+// ===== Main route =====
 app.get("/", async (req, res) => {
-    const timestamp = Date.now();
-    const targetUrl = req.query.url;
-    if (!targetUrl) return res.status(400).send("Missing url parameter");
-
-    const debug = req.query.debug === "1";
-    const download = req.query.download === "1";
-
-    // headers giả browser
-    const customHeaders = {
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        Referer: new URL(targetUrl).origin,
-        Origin: new URL(targetUrl).origin,
-    };
-
     try {
+        const timestamp = Date.now();
+        const targetUrl = req.query.url;
+        if (!targetUrl) return res.status(400).send("Missing url parameter");
+
+        const debug = req.query.debug === "1";
+        const download = req.query.download === "1";
+
         const upstreamResponse = await fetch(targetUrl, {
-            headers: customHeaders,
+            headers: {
+                "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                Referer: new URL(targetUrl).origin,
+                Origin: new URL(targetUrl).origin,
+            },
             redirect: "follow",
         });
 
@@ -44,6 +41,7 @@ app.get("/", async (req, res) => {
             upstreamResponse.headers.get("content-type") ||
             "application/octet-stream";
 
+        // 👉 Debug mode: trả text/json/xml luôn
         if (debug) {
             if (
                 contentType.startsWith("text/") ||
@@ -55,20 +53,14 @@ app.get("/", async (req, res) => {
             }
         }
 
-        // tên file xuất ra
+        // tên file
         let extension =
             req.query.extension ||
             contentType.split("/")[1]?.split(";")[0] ||
             "bin";
 
-        const quality = req.query.quality;
-        const name = req.query.name;
-        const newName = name
-            ? `${name}_${timestamp}`
-            : quality
-                ? `${quality}_${timestamp}`
-                : `zmapi_${timestamp}`;
-        const filename = `${newName}.${extension}`;
+        const name = req.query.name || "download";
+        const filename = `${name}_${timestamp}.${extension}`;
 
         res.setHeader("Content-Type", contentType);
         if (download) {
@@ -78,22 +70,28 @@ app.get("/", async (req, res) => {
             );
         }
 
-        // ✅ Stream an toàn bằng pipeline
-        await pump(
-            Readable.fromWeb(upstreamResponse.body),
-            res
-        );
+        const nodeStream = Readable.fromWeb(upstreamResponse.body);
+
+        // 👉 Bắt client cancel
+        res.on("close", () => {
+            console.log("Client closed connection early");
+            nodeStream.destroy();
+        });
+
+        await pump(nodeStream, res);
+
     } catch (err) {
-        console.error("Proxy error:", err);
+        if (err.code === "ERR_STREAM_PREMATURE_CLOSE") {
+            console.warn("Premature close (client cancelled or server closed early)");
+        } else {
+            console.error("Proxy error:", err);
+        }
         if (!res.headersSent) {
             res.status(502).send(`Error fetching the url: ${err.message}`);
-        } else {
-            res.end();
         }
     }
 });
 
-// ===== Start server =====
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
 });
