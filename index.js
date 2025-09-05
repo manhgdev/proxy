@@ -1,14 +1,8 @@
-// index.js
 import express from "express";
-import { Readable } from "stream";
-import { pipeline } from "stream";
-import { promisify } from "util";
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const pump = promisify(pipeline);
 
-// ===== Middleware CORS =====
 app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
@@ -17,7 +11,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// ===== Main route =====
 app.get("/", async (req, res) => {
     try {
         const timestamp = Date.now();
@@ -41,7 +34,7 @@ app.get("/", async (req, res) => {
             upstreamResponse.headers.get("content-type") ||
             "application/octet-stream";
 
-        // 👉 Debug mode: trả text/json/xml luôn
+        // Debug mode
         if (debug) {
             if (
                 contentType.startsWith("text/") ||
@@ -53,7 +46,7 @@ app.get("/", async (req, res) => {
             }
         }
 
-        // tên file
+        // Filename
         let extension =
             req.query.extension ||
             contentType.split("/")[1]?.split(";")[0] ||
@@ -70,22 +63,34 @@ app.get("/", async (req, res) => {
             );
         }
 
-        const nodeStream = Readable.fromWeb(upstreamResponse.body);
+        // ✅ Stream trực tiếp web stream → Node response (không cần pipeline)
+        const webStream = upstreamResponse.body;
 
-        // 👉 Bắt client cancel
+        // Khi client hủy -> hủy luôn fetch
         res.on("close", () => {
-            // console.log("Client closed connection early");
-            nodeStream.destroy();
+            try {
+                webStream.cancel();
+            } catch {}
         });
 
-        await pump(nodeStream, res);
+        // Ghi dữ liệu xuống response
+        webStream
+            .pipeTo(res.writable)
+            .catch((err) => {
+                if (err?.cause?.code === "UND_ERR_SOCKET") {
+                    console.warn("Upstream socket closed early");
+                } else {
+                    console.error("Stream error:", err);
+                }
+                if (!res.headersSent) {
+                    res.status(502).end("Error while streaming file");
+                } else {
+                    res.end();
+                }
+            });
 
     } catch (err) {
-        if (err.code === "ERR_STREAM_PREMATURE_CLOSE") {
-            console.warn("Premature close (client cancelled or server closed early)");
-        } else {
-            console.error("Proxy error:", err);
-        }
+        console.error("Proxy error:", err);
         if (!res.headersSent) {
             res.status(502).send(`Error fetching the url: ${err.message}`);
         }
