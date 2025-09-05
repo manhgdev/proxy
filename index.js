@@ -74,7 +74,7 @@ app.get("/", async (req, res) => {
 
         // 👉 Bắt client cancel
         res.on("close", () => {
-            console.log("Client closed connection early");
+            // console.log("Client closed connection early");
             nodeStream.destroy();
         });
 
