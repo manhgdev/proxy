@@ -1,8 +1,14 @@
+// index.js
 import express from "express";
+import { Readable } from "stream";
+import { pipeline } from "stream";
+import { promisify } from "util";
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+const pump = promisify(pipeline);
 
+// ===== Middleware CORS =====
 app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
@@ -11,6 +17,7 @@ app.use((req, res, next) => {
     next();
 });
 
+// ===== Main route =====
 app.get("/", async (req, res) => {
     try {
         const timestamp = Date.now();
@@ -34,7 +41,7 @@ app.get("/", async (req, res) => {
             upstreamResponse.headers.get("content-type") ||
             "application/octet-stream";
 
-        // Debug mode
+        // 👉 Debug mode: trả text/json/xml luôn
         if (debug) {
             if (
                 contentType.startsWith("text/") ||
@@ -46,7 +53,7 @@ app.get("/", async (req, res) => {
             }
         }
 
-        // Filename
+        // tên file
         let extension =
             req.query.extension ||
             contentType.split("/")[1]?.split(";")[0] ||
@@ -63,36 +70,29 @@ app.get("/", async (req, res) => {
             );
         }
 
-        // ✅ Stream trực tiếp web stream → Node response (không cần pipeline)
-        const webStream = upstreamResponse.body;
+        // ✅ Convert Web Stream → Node Stream
+        const nodeStream = Readable.fromWeb(upstreamResponse.body);
 
-        // Khi client hủy -> hủy luôn fetch
+        // Nếu client đóng sớm thì dọn dẹp
         res.on("close", () => {
-            try {
-                webStream.cancel();
-            } catch {}
+            nodeStream.destroy();
         });
 
-        // Ghi dữ liệu xuống response
-        webStream
-            .pipeTo(res.writable)
-            .catch((err) => {
-                if (err?.cause?.code === "UND_ERR_SOCKET") {
-                    console.warn("Upstream socket closed early");
-                } else {
-                    console.error("Stream error:", err);
-                }
-                if (!res.headersSent) {
-                    res.status(502).end("Error while streaming file");
-                } else {
-                    res.end();
-                }
-            });
+        // ✅ Dùng pipeline để tránh crash
+        await pump(nodeStream, res);
 
     } catch (err) {
-        console.error("Proxy error:", err);
+        if (err?.cause?.code === "UND_ERR_SOCKET") {
+            console.warn("Upstream socket closed early");
+        } else if (err.code === "ERR_STREAM_PREMATURE_CLOSE") {
+            console.warn("Client closed connection early");
+        } else {
+            console.error("Proxy error:", err);
+        }
         if (!res.headersSent) {
-            res.status(502).send(`Error fetching the url: ${err.message}`);
+            res.status(502).send("Error fetching the url");
+        } else {
+            res.end();
         }
     }
 });
