@@ -31,8 +31,6 @@ app.get("/", async (req, res) => {
             headers: {
                 "User-Agent":
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-                Referer: new URL(targetUrl).origin,
-                Origin: new URL(targetUrl).origin,
             },
             redirect: "follow",
         });
